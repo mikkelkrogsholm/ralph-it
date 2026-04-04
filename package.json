@@ -1,0 +1,21 @@
+{
+  "name": "ralph-it",
+  "version": "0.1.0",
+  "description": "Autonomous agent loop runner powered by GitHub Issues",
+  "type": "module",
+  "bin": {
+    "ralph-it": "./src/cli.ts"
+  },
+  "scripts": {
+    "dev": "bun run src/cli.ts",
+    "test": "bun test"
+  },
+  "engines": {
+    "bun": ">=1.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git@github.com:mikkelkrogsholm/ralph-it.git"
+  },
+  "license": "MIT"
+}
