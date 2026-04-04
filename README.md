@@ -5,9 +5,13 @@ Autonomous agent loop runner powered by GitHub Issues. Point it at a repo, label
 ## How it works
 
 ```
-You create issues → ralph-it picks them up → agent works →
-commits → comments on issue → closes issue → next issue
+You + agent set up the project → create issues → ralph-it runs autonomously
+     Phase 1: collaborative          Phase 2: execution
 ```
+
+**Phase 1:** You work with an AI assistant (Claude Code, etc.) to set up your project, make design decisions, and configure ralph-it. This is collaborative, high-context work.
+
+**Phase 2:** ralph-it takes over. It picks issues from the queue, runs the agent, commits, comments, and closes — no human in the loop.
 
 Each iteration:
 1. Fetch the next `ralph:queued` issue (sorted by priority)
@@ -18,14 +22,28 @@ Each iteration:
 6. On failure: comment error, label `ralph:failed`, delete branch
 7. Move to next issue
 
-## Prerequisites
+## Install the skill (recommended)
+
+The fastest way to get started is to install the ralph-it skill for your AI agent. Once installed, your agent knows everything about ralph-it and can help you set it up, create issues in the right format, write RALPH.md, and run loops.
+
+```bash
+npx skills add https://github.com/mikkelkrogsholm/ralph-it --skill ralph-it
+```
+
+Then just tell your agent: *"Set up ralph-it on this project"* — it handles the rest.
+
+## Manual setup
+
+If you prefer to set things up yourself:
+
+### Prerequisites
 
 - [Bun](https://bun.sh) >= 1.0
 - [GitHub CLI](https://cli.github.com) (`gh`) authenticated
 - A git repo with GitHub Issues enabled
 - An AI coding agent CLI (Claude Code, Codex, Gemini, Aider, etc.)
 
-## Installation
+### Installation
 
 ```bash
 # Clone and use directly
@@ -36,7 +54,7 @@ cd ralph-it
 bun install github:mikkelkrogsholm/ralph-it
 ```
 
-## Quick start
+### Quick start
 
 ```bash
 # 1. Initialize in your project
@@ -48,7 +66,7 @@ ralph-it setup
 # 3. Verify everything works
 ralph-it doctor
 
-# 4. Create an issue on GitHub with the label "ralph:queued"
+# 4. Create issues with the ralph:queued label
 # 5. Run the agent loop
 ralph-it run
 ```
@@ -94,14 +112,11 @@ ralph-it run --label type:bug       # Only issues with this label
 ralph-it run --milestone "v2.0"     # Only issues in milestone
 ralph-it run --timeout 900          # Override agent timeout (seconds)
 ralph-it run --arg target=90        # Pass argument to template
-ralph-it run --arg target=90 --arg lang=da  # Multiple args
 ralph-it run --include-diff         # Add git diff to issue comment
 ralph-it run --dry-run              # Show what would be done
 ```
 
 ### `ralph-it list`
-
-Show queued issues.
 
 ```bash
 ralph-it list        # Show ralph:queued issues
@@ -110,27 +125,85 @@ ralph-it list --all  # Show all ralph-managed issues
 
 ### `ralph-it status`
 
-Show project overview with issue counts per state.
-
 ```bash
-ralph-it status
+ralph-it status      # Show repo info + issue counts per state
 ```
 
-## RALPH.md reference
+## Issue format
 
-RALPH.md uses a simple key=value frontmatter format between `---` delimiters, followed by the prompt template.
+Structured issues give the agent clear context. Use this format:
+
+```markdown
+## Context
+Brief background — what exists now, what's the problem or need.
+
+## Task
+Precise description of what the agent should do.
+
+## Acceptance Criteria
+- [ ] Tests pass
+- [ ] No new lint errors
+- [ ] [Task-specific criteria]
+
+## Scope
+Files and modules the agent should focus on.
+
+## Constraints
+What the agent should NOT do.
+```
+
+**Required labels:** `ralph:queued` + one `type:` label + one `priority:` label.
+
+See `skill/ralph-it/references/issues.md` for detailed examples per issue type.
+
+## RALPH.md
+
+RALPH.md uses a simple key=value frontmatter format, followed by the prompt template.
+
+### Example
+
+```
+---
+agent.command = claude
+agent.args = -p --dangerously-skip-permissions
+agent.input = stdin
+agent.timeout = 600
+credit = true
+
+command.tests = npm test -- --reporter=summary 2>&1 | tail -20
+command.lint = npm run lint 2>&1 | tail -10
+---
+
+<!-- Notes stripped before sending to agent -->
+
+You are an autonomous coding agent (iteration {{ ralph.iteration }}).
+
+## Project
+{{ repo.description }}
+
+## Task
+Issue #{{ issue.number }}: {{ issue.title }}
+
+{{ issue.body }}
+
+## Discussion
+{{ issue.comments }}
+
+## Test Results
+{{ commands.tests }}
+```
 
 ### Frontmatter fields
 
 | Field | Required | Default | Description |
 |-------|----------|---------|-------------|
-| `agent.command` | Yes | — | Agent executable (claude, codex, gemini, aider) |
-| `agent.args` | No | — | CLI arguments (space-separated) |
-| `agent.input` | No | `stdin` | How to deliver the prompt: `stdin`, `file`, or `argument` |
-| `agent.timeout` | No | `600` | Agent timeout in seconds |
-| `command.<name>` | No | — | Shell command whose output is available via `{{ commands.<name> }}` |
-| `command.<name>.timeout` | No | `60` | Timeout for a specific command in seconds |
-| `credit` | No | `true` | Append co-author instruction to prompt |
+| `agent.command` | Yes | — | Agent executable |
+| `agent.args` | No | — | CLI arguments |
+| `agent.input` | No | `stdin` | `stdin`, `file`, or `argument` |
+| `agent.timeout` | No | `600` | Agent timeout (seconds) |
+| `command.<name>` | No | — | Shell command for `{{ commands.<name> }}` |
+| `command.<name>.timeout` | No | `60` | Per-command timeout (seconds) |
+| `credit` | No | `true` | Append co-author instruction |
 
 ### Template placeholders
 
@@ -142,158 +215,64 @@ RALPH.md uses a simple key=value frontmatter format between `---` delimiters, fo
 | `{{ issue.title }}` | Issue title |
 | `{{ issue.body }}` | Issue body |
 | `{{ issue.comments }}` | Formatted comment thread |
-| `{{ issue.labels }}` | Comma-separated label names |
+| `{{ issue.labels }}` | Comma-separated labels |
 | `{{ commands.<name> }}` | Output from named command |
-| `{{ args.<name> }}` | Runtime argument passed via `--arg key=value` |
+| `{{ args.<name> }}` | Runtime argument (`--arg key=value`) |
 | `{{ ralph.iteration }}` | Current iteration number |
 
-### Example RALPH.md
-
-```
----
-agent.command = claude
-agent.args = -p --dangerously-skip-permissions
-agent.input = stdin
-agent.timeout = 600
-credit = true
-
-command.coverage = ./check-coverage.sh
-command.coverage.timeout = 120
----
-
-<!-- Notes for yourself — stripped from the prompt before sending to agent -->
-
-You are an autonomous coding agent (iteration {{ ralph.iteration }}).
-Each iteration: solve the task, test your changes, and commit.
-
-## Project
-{{ repo.description }}
-Languages: {{ repo.languages }}
-
-## Task
-Issue #{{ issue.number }}: {{ issue.title }}
-
-{{ issue.body }}
-
-## Discussion
-{{ issue.comments }}
-
-## Coverage
-{{ commands.coverage }}
-```
-
-### HTML comments
-
-HTML comments (`<!-- ... -->`) in RALPH.md are stripped before the prompt is sent to the agent. Use them for notes, TODOs, or documentation that the agent should not see.
-
-### Runtime arguments
-
-Pass arguments at runtime with `--arg key=value`:
-
-```bash
-ralph-it run --arg target=90 --arg lang=da
-```
-
-Reference them in the template:
-
-```
-Target coverage: {{ args.target }}
-Language: {{ args.lang }}
-```
-
-### Co-author credit
-
-When `credit = true` (default), ralph-it appends an instruction to the prompt asking the agent to include a `Co-Authored-By: ralph-it` trailer in commit messages. Disable with `credit = false`.
+HTML comments (`<!-- -->`) are stripped from the prompt before sending.
 
 ## Agent configuration
 
-### Claude Code
-
-```
-agent.command = claude
-agent.args = -p --dangerously-skip-permissions
-agent.input = stdin
-```
-
-### OpenAI Codex
-
-```
-agent.command = codex
-agent.args = exec --full-auto -
-agent.input = stdin
-```
-
-### Google Gemini CLI
-
-```
-agent.command = gemini
-agent.args = --prompt - --yolo
-agent.input = stdin
-```
-
-### Aider
-
-```
-agent.command = aider
-agent.args = --message-file {prompt_file} --yes
-agent.input = file
-```
-
-### Custom agent
-
-Any CLI that accepts a prompt via stdin or file:
-
-```
-agent.command = my-agent
-agent.args = --input {prompt_file}
-agent.input = argument
-```
+| Agent | command | args | input |
+|-------|---------|------|-------|
+| **Claude Code** | `claude` | `-p --dangerously-skip-permissions` | `stdin` |
+| **Codex** | `codex` | `exec --full-auto -` | `stdin` |
+| **Gemini CLI** | `gemini` | `--prompt - --yolo` | `stdin` |
+| **Aider** | `aider` | `--message-file {prompt_file} --yes` | `file` |
 
 ## Label system
 
-ralph-it uses 19 labels organized in three groups.
+19 labels in three groups, created by `ralph-it setup`.
 
-### State labels (managed by ralph-it)
+**State** (managed automatically):
+`ralph:queued` → `ralph:in-progress` → `ralph:done` (closed) / `ralph:failed` / `ralph:blocked`
 
-| Label | Color | Description |
-|-------|-------|-------------|
-| `ralph:queued` | Green | Ready for agent pickup |
-| `ralph:in-progress` | Yellow | Agent is working |
-| `ralph:done` | Purple | Completed by agent |
-| `ralph:failed` | Red | Agent failed |
-| `ralph:blocked` | Light yellow | Needs human intervention |
+**Priority** (determines processing order):
+`priority:critical` > `priority:high` > `priority:medium` > `priority:low`
 
-### State machine
-
-```
-ralph:queued → ralph:in-progress → ralph:done (closed)
-                                 → ralph:failed
-```
-
-### Priority labels
-
-| Label | Description |
-|-------|-------------|
-| `priority:critical` | Must be done immediately |
-| `priority:high` | Important, do soon |
-| `priority:medium` | Normal priority |
-| `priority:low` | Nice to have |
-
-Issues are processed in priority order (critical first).
-
-### Type labels
-
+**Type:**
 `type:bug`, `type:feature`, `type:refactor`, `type:docs`, `type:test`, `type:chore`, `type:security`, `type:perf`, `type:migration`, `type:research`
 
-## GitHub Actions
+## Logging & monitoring
 
-Run ralph-it on a schedule in CI:
+Each run writes:
+- **`.ralph/run.lock`** — real-time state (prevents concurrent runs)
+- **`.ralph/logs/{run-id}.jsonl`** — append-only event log
+
+Follow along live:
+
+```bash
+tail -f .ralph/logs/*.jsonl
+```
+
+Query with jq:
+
+```bash
+# Iteration results
+cat .ralph/logs/*.jsonl | jq 'select(.event == "iteration:done")'
+
+# Failures only
+cat .ralph/logs/*.jsonl | jq 'select(.result == "failed")'
+```
+
+## GitHub Actions
 
 ```yaml
 name: ralph-it
 on:
   schedule:
-    - cron: '0 */2 * * *'  # Every 2 hours
+    - cron: '0 */2 * * *'
   workflow_dispatch:
 
 jobs:
@@ -314,29 +293,15 @@ jobs:
 
 ## Troubleshooting
 
-### "gh not found"
-
-Install the GitHub CLI: https://cli.github.com
-
-### "Not authenticated"
-
-Run `gh auth login` and follow the prompts.
-
-### "No RALPH.md found"
-
-Run `ralph-it init` in your project directory.
-
-### Agent times out
-
-Increase the timeout in RALPH.md (`agent.timeout = 1200`) or via `--timeout` flag.
-
-### Issue stuck in "ralph:in-progress"
-
-The agent may have crashed. Run `ralph-it doctor` to detect stuck issues, then manually remove the `ralph:in-progress` label and add `ralph:queued` to retry.
-
-### Merge conflict after agent completes
-
-The branch `ralph/issue-{N}` is preserved for manual review. Resolve the conflict and merge manually.
+| Problem | Solution |
+|---------|----------|
+| "gh not found" | Install: https://cli.github.com |
+| "Not authenticated" | Run `gh auth login` |
+| "No RALPH.md found" | Run `ralph-it init` |
+| Agent times out | `agent.timeout = 1200` or `--timeout 1200` |
+| Issue stuck in-progress | `ralph-it doctor` detects it. Manual fix: swap labels |
+| Merge conflict | Branch `ralph/issue-{N}` preserved for manual review |
+| Concurrent run blocked | Delete `.ralph/run.lock` if stale |
 
 ## License
 
