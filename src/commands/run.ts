@@ -6,6 +6,7 @@ import { spawnAgent, buildComment } from "../lib/agent"
 import { PRIORITY_ORDER } from "../lib/labels"
 import { initSignalHandlers, isShuttingDown } from "../lib/signals"
 import { log } from "../lib/log"
+import { RunSession } from "../lib/lockfile"
 import type { Issue } from "../lib/github"
 
 const HELP = `ralph-it run — Process queued issues with the configured agent
@@ -89,6 +90,16 @@ export async function run(args: string[]): Promise<void> {
 
   initSignalHandlers()
 
+  // Check for existing lock
+  const existingLock = await RunSession.isLocked(cwd)
+  if (existingLock) {
+    throw new Error(
+      `Another ralph-it run is active (pid ${existingLock.pid}, run ${existingLock.runId}, ` +
+      `started ${existingLock.startedAt}). ` +
+      `If this is stale, delete .ralph/run.lock`
+    )
+  }
+
   // Fetch once, reuse across iterations
   const repo = await getRepoContext()
   const baseBranch = await getDefaultBranch(cwd)
@@ -102,11 +113,21 @@ export async function run(args: string[]): Promise<void> {
         ? "Watch mode"
         : "Processing queue"
 
+  // Create session with lock + log
+  const session = new RunSession(cwd, mode, ralphConfig.agent.command)
+  if (!dryRun) {
+    await session.start()
+  }
+
   log.runStart(mode, {
     agent: ralphConfig.agent.command,
     commands: ralphConfig.commands.length,
     timeout: ralphConfig.agent.timeout,
   })
+
+  if (!dryRun) {
+    log.info(`Run ${session.runId} — log: .ralph/logs/${session.runId}.jsonl`)
+  }
 
   const runStartTime = Date.now()
   let succeeded = 0
@@ -153,6 +174,7 @@ export async function run(args: string[]): Promise<void> {
     }
 
     log.iterationStart(iterations, issue.number, issue.title)
+    await session.iterationStart(iterations, { number: issue.number, title: issue.title })
 
     // 2. Claim issue
     log.claiming(issue.number)
@@ -193,11 +215,13 @@ export async function run(args: string[]): Promise<void> {
       // 4. Execute commands
       if (ralphConfig.commands.length > 0) {
         log.runningCommands(ralphConfig.commands.length)
+        const cmdStart = Date.now()
         const commandOutputs = await executeCommands(ralphConfig.commands)
         for (const [name, output] of Object.entries(commandOutputs)) {
           const ok = !output.startsWith("[command ")
           const preview = ok ? output.slice(0, 60).replace(/\n/g, " ") : output
           log.commandResult(name, ok, preview)
+          session.logCommand(name, ok, Date.now() - cmdStart, output)
         }
         var commandResults = commandOutputs
       } else {
@@ -238,6 +262,7 @@ export async function run(args: string[]): Promise<void> {
       }
 
       log.renderingPrompt(rendered.length)
+      session.logPromptRendered(rendered.length)
 
       // 6. Write prompt to file
       const promptDir = resolve(cwd, ".ralph")
@@ -251,7 +276,9 @@ export async function run(args: string[]): Promise<void> {
 
       // 7. Spawn agent
       log.spawningAgent(ralphConfig.agent.command)
+      session.logAgentStart()
       const result = await spawnAgent(ralphConfig.agent, promptFile, cwd)
+      session.logAgentDone(result.exitCode, result.timedOut, result.elapsed)
       const iterElapsed = Date.now() - iterStart
 
       // 8. Handle result
@@ -293,6 +320,7 @@ export async function run(args: string[]): Promise<void> {
         } else {
           log.iterationSuccess(issue.number, iterElapsed)
         }
+        await session.iterationSuccess(issue.number, iterElapsed)
         succeeded++
 
         if (branchCreated) {
@@ -316,8 +344,10 @@ export async function run(args: string[]): Promise<void> {
 
         if (result.timedOut) {
           log.iterationTimeout(issue.number, iterElapsed)
+          await session.iterationFailed(issue.number, iterElapsed, "timeout")
         } else {
           log.iterationFailed(issue.number, result.exitCode, iterElapsed)
+          await session.iterationFailed(issue.number, iterElapsed, `exit ${result.exitCode}`)
         }
         failed++
 
@@ -331,6 +361,7 @@ export async function run(args: string[]): Promise<void> {
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err)
       log.iterationError(issue.number, errMsg)
+      await session.iterationFailed(issue.number, Date.now() - iterStart, errMsg)
       try {
         await commentOnIssue(issue.number, `## Ralph error on #${issue.number}\n\n\`\`\`\n${errMsg}\n\`\`\``)
         await updateIssueLabels(issue.number, ["ralph:failed"], ["ralph:in-progress"])
@@ -371,7 +402,11 @@ export async function run(args: string[]): Promise<void> {
     }
   }
 
-  // Summary
+  // Summary + cleanup
+  if (!dryRun) {
+    await session.end()
+  }
+
   if (iterations > 0 && !dryRun) {
     log.runEnd({
       iterations,

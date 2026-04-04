@@ -1,4 +1,6 @@
 node_modules/
 dist/
 .ralph/prompt.md
+.ralph/run.lock
+.ralph/logs/
 .DS_Store
