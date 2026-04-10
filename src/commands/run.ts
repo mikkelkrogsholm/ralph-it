@@ -338,17 +338,26 @@ export async function run(args: string[]): Promise<void> {
             log.warn(`Could not merge ${branchName}, branch preserved`)
           }
         }
+      } else if (result.timedOut) {
+        // Timeout: put back in queue for next iteration (work is preserved on disk)
+        await commentOnIssue(issue.number, comment)
+        await updateIssueLabels(issue.number, ["ralph:queued"], ["ralph:in-progress"])
+        log.iterationTimeout(issue.number, iterElapsed)
+        await session.iterationFailed(issue.number, iterElapsed, "timeout")
+        // Don't count as failed — it will be retried
+
+        if (branchCreated) {
+          // Keep the branch — it has partial work
+          try {
+            await Bun.spawn(["git", "checkout", baseBranch], { cwd }).exited
+            log.info(`Branch ${branchName} preserved with partial work`)
+          } catch { /* ignore */ }
+        }
       } else {
         await commentOnIssue(issue.number, comment)
         await updateIssueLabels(issue.number, ["ralph:failed"], ["ralph:in-progress"])
-
-        if (result.timedOut) {
-          log.iterationTimeout(issue.number, iterElapsed)
-          await session.iterationFailed(issue.number, iterElapsed, "timeout")
-        } else {
-          log.iterationFailed(issue.number, result.exitCode, iterElapsed)
-          await session.iterationFailed(issue.number, iterElapsed, `exit ${result.exitCode}`)
-        }
+        log.iterationFailed(issue.number, result.exitCode, iterElapsed)
+        await session.iterationFailed(issue.number, iterElapsed, `exit ${result.exitCode}`)
         failed++
 
         if (branchCreated) {
