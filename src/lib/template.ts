@@ -15,6 +15,7 @@ export interface RalphConfig {
   agent: AgentConfig
   commands: CommandDef[]
   credit: boolean
+  baseBranch: string | null
   template: string
 }
 
@@ -111,10 +112,11 @@ export async function parseRalphFile(cwd: string): Promise<RalphConfig> {
   const agent = buildAgentConfig(fm)
   const commands = buildCommands(fm)
   const credit = (fm["credit"] ?? "true") !== "false"
+  const baseBranch = fm["base.branch"] ?? null
   const rawTemplate = extractTemplate(content)
   const template = stripHtmlComments(rawTemplate)
 
-  return { agent, commands, credit, template }
+  return { agent, commands, credit, baseBranch, template }
 }
 
 export async function executeCommands(commands: CommandDef[]): Promise<Record<string, string>> {

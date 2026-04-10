@@ -204,6 +204,7 @@ Issue #{{ issue.number }}: {{ issue.title }}
 | `command.<name>` | No | — | Shell command for `{{ commands.<name> }}` |
 | `command.<name>.timeout` | No | `60` | Per-command timeout (seconds) |
 | `credit` | No | `true` | Append co-author instruction |
+| `base.branch` | No | repo default | Base branch for branching and merging |
 
 ### Template placeholders
 

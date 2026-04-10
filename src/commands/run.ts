@@ -102,7 +102,7 @@ export async function run(args: string[]): Promise<void> {
 
   // Fetch once, reuse across iterations
   const repo = await getRepoContext()
-  const baseBranch = await getDefaultBranch(cwd)
+  const baseBranch = ralphConfig.baseBranch ?? await getDefaultBranch(cwd)
 
   // Determine mode label
   const mode = issueNumber
